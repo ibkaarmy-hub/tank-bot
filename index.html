@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tank Bot - Enhanced (Geometric)</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #game-container {
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            border: 4px solid #444;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <script>
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            parent: 'game-container',
+            backgroundColor: '#333',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            }
+        };
+
+        const game = new Phaser.Game(config);
+
+        let player;
+        let cursors;
+        let wasd;
+        let bullets;
+        let enemies;
+        let lastFiredTime = 0;
+        let score = 0;
+        let playerHealth = 100;
+        let currentWeapon = 1;
+        
+        let scoreText;
+        let healthText;
+        let weaponText;
+        let cooldownText;
+
+        const weaponStats = {
+            1: { name: 'Small', damage: 10, cooldown: 0, color: 0x00ff00, speed: 450 },
+            2: { name: 'Medium', damage: 20, cooldown: 1000, color: 0xffff00, speed: 400 },
+            3: { name: 'Max', damage: 30, cooldown: 3000, color: 0xff0000, speed: 350 }
+        };
+
+        function preload() {
+            // Using Phaser Labs for sound effects
+            this.load.setBaseURL('https://labs.phaser.io');
+            this.load.audio('shoot', 'assets/audio/SoundEffects/blaster.mp3');
+            this.load.audio('explode', 'assets/audio/SoundEffects/explosion.mp3');
+        }
+
+        function create() {
+            // Generate Tank Texture
+            const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+            
+            // Player Body
+            graphics.fillStyle(0x3498db, 1);
+            graphics.fillRect(0, 0, 40, 40);
+            graphics.lineStyle(2, 0x2980b9, 1);
+            graphics.strokeRect(0, 0, 40, 40);
+            graphics.generateTexture('player_body', 40, 40);
+            graphics.clear();
+
+            // Player Barrel
+            graphics.fillStyle(0x2980b9, 1);
+            graphics.fillRect(0, 0, 10, 30);
+            graphics.generateTexture('player_barrel', 10, 30);
+            graphics.clear();
+
+            // Enemy Body
+            graphics.fillStyle(0xe74c3c, 1);
+            graphics.fillRect(0, 0, 40, 40);
+            graphics.lineStyle(2, 0xc0392b, 1);
+            graphics.strokeRect(0, 0, 40, 40);
+            graphics.generateTexture('enemy_body', 40, 40);
+            graphics.clear();
+
+            // Enemy Barrel
+            graphics.fillStyle(0xc0392b, 1);
+            graphics.fillRect(0, 0, 10, 30);
+            graphics.generateTexture('enemy_barrel', 10, 30);
+            graphics.clear();
+
+            // Create Player Tank Container
+            player = this.add.container(400, 300);
+            const body = this.add.image(0, 0, 'player_body');
+            const barrel = this.add.image(0, -10, 'player_barrel').setOrigin(0.5, 1);
+            player.add([body, barrel]);
+            player.barrel = barrel;
+            
+            this.physics.add.existing(player);
+            player.body.setCollideWorldBounds(true);
+            player.body.setSize(40, 40);
+
+            // Controls
+            cursors = this.input.keyboard.createCursorKeys();
+            wasd = this.input.keyboard.addKeys({
+                up: Phaser.Input.Keyboard.KeyCodes.W,
+                down: Phaser.Input.Keyboard.KeyCodes.S,
+                left: Phaser.Input.Keyboard.KeyCodes.A,
+                right: Phaser.Input.Keyboard.KeyCodes.D,
+                one: Phaser.Input.Keyboard.KeyCodes.ONE,
+                two: Phaser.Input.Keyboard.KeyCodes.TWO,
+                three: Phaser.Input.Keyboard.KeyCodes.THREE,
+                space: Phaser.Input.Keyboard.KeyCodes.SPACE
+            });
+
+            // Groups
+            bullets = this.physics.add.group();
+            enemies = this.physics.add.group();
+
+            // HUD
+            const hudBg = this.add.rectangle(0, 0, 800, 50, 0x000000, 0.5).setOrigin(0, 0);
+            scoreText = this.add.text(20, 15, 'Score: 0', { fontSize: '18px', fill: '#fff' });
+            healthText = this.add.text(200, 15, 'Health: 100%', { fontSize: '18px', fill: '#fff' });
+            weaponText = this.add.text(400, 15, 'Weapon: Small', { fontSize: '18px', fill: '#fff' });
+            cooldownText = this.add.text(620, 15, 'Ready', { fontSize: '18px', fill: '#0f0' });
+
+            // Enemy Spawner
+            this.time.addEvent({
+                delay: 5000,
+                callback: spawnEnemy,
+                callbackScope: this,
+                loop: true
+            });
+
+            // Collisions
+            this.physics.add.overlap(bullets, enemies, hitEnemy, null, this);
+            this.physics.add.overlap(player, enemies, hitPlayer, null, this);
+        }
+
+        function update(time, delta) {
+            if (playerHealth <= 0) return;
+
+            // Movement & Rotation
+            const speed = 200;
+            player.body.setVelocity(0);
+
+            if (cursors.left.isDown || wasd.left.isDown) {
+                player.body.setVelocityX(-speed);
+                player.angle = -90;
+            } else if (cursors.right.isDown || wasd.right.isDown) {
+                player.body.setVelocityX(speed);
+                player.angle = 90;
+            }
+
+            if (cursors.up.isDown || wasd.up.isDown) {
+                player.body.setVelocityY(-speed);
+                player.angle = 0;
+            } else if (cursors.down.isDown || wasd.down.isDown) {
+                player.body.setVelocityY(speed);
+                player.angle = 180;
+            }
+
+            // Weapon Selection
+            if (Phaser.Input.Keyboard.JustDown(wasd.one)) currentWeapon = 1;
+            if (Phaser.Input.Keyboard.JustDown(wasd.two)) currentWeapon = 2;
+            if (Phaser.Input.Keyboard.JustDown(wasd.three)) currentWeapon = 3;
+
+            // Firing
+            if (wasd.space.isDown) {
+                fireBullet.call(this, time);
+            }
+
+            // Update UI
+            updateUI(time);
+        }
+
+        function fireBullet(time) {
+            const weapon = weaponStats[currentWeapon];
+            if (time < lastFiredTime + weapon.cooldown) return;
+
+            lastFiredTime = time;
+            
+            // Sound
+            try { this.sound.play('shoot', { volume: 0.3 }); } catch(e) {}
+
+            // Calculate tip of the barrel for firing position
+            const angleRad = Phaser.Math.DegToRad(player.angle - 90);
+            const barrelLength = 40; 
+            const fireX = player.x + Math.cos(angleRad) * barrelLength;
+            const fireY = player.y + Math.sin(angleRad) * barrelLength;
+
+            // Bullet visual
+            const bullet = this.add.circle(fireX, fireY, 5, weapon.color);
+            this.physics.add.existing(bullet);
+            
+            bullet.body.setVelocity(
+                Math.cos(angleRad) * weapon.speed,
+                Math.sin(angleRad) * weapon.speed
+            );
+            
+            bullet.damage = weapon.damage;
+            bullets.add(bullet);
+
+            // Destroy bullet when out of bounds
+            this.time.addEvent({
+                delay: 2000,
+                callback: () => { if (bullet.active) bullet.destroy(); }
+            });
+        }
+
+        function spawnEnemy() {
+            const side = Phaser.Math.Between(0, 3);
+            let x, y;
+
+            if (side === 0) { x = Phaser.Math.Between(0, 800); y = -50; }
+            else if (side === 1) { x = 850; y = Phaser.Math.Between(0, 600); }
+            else if (side === 2) { x = Phaser.Math.Between(0, 800); y = 650; }
+            else { x = -50; y = Phaser.Math.Between(0, 600); }
+
+            const enemy = this.add.container(x, y);
+            const body = this.add.image(0, 0, 'enemy_body');
+            const barrel = this.add.image(0, -10, 'enemy_barrel').setOrigin(0.5, 1);
+            const armorBar = this.add.rectangle(0, -45, 40, 5, 0x2ecc71);
+            enemy.add([body, barrel, armorBar]);
+            
+            this.physics.add.existing(enemy);
+            enemy.armor = 100;
+            enemy.armorBar = armorBar;
+            enemies.add(enemy);
+
+            // Move towards player
+            this.physics.moveToObject(enemy, player, 80);
+            
+            // Rotate enemy towards player
+            this.time.addEvent({
+                delay: 100,
+                callback: () => {
+                    if (enemy.active) {
+                        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+                        enemy.angle = Phaser.Math.RadToDeg(angle) + 90;
+                    }
+                },
+                loop: true
+            });
+        }
+
+        function hitEnemy(bullet, enemy) {
+            enemy.armor -= bullet.damage;
+            bullet.destroy();
+
+            const healthPercent = Math.max(0, enemy.armor / 100);
+            enemy.armorBar.width = 40 * healthPercent;
+            
+            if (enemy.armor <= 30) enemy.armorBar.setFillStyle(0xe74c3c);
+            else if (enemy.armor <= 60) enemy.armorBar.setFillStyle(0xf1c40f);
+
+            if (enemy.armor <= 0) {
+                score += 10;
+                // Simple explosion effect with circles
+                createExplosion.call(this, enemy.x, enemy.y);
+                try { this.sound.play('explode', { volume: 0.4 }); } catch(e) {}
+                enemy.destroy();
+            }
+        }
+
+        function createExplosion(x, y) {
+            for (let i = 0; i < 8; i++) {
+                const particle = this.add.circle(x, y, Phaser.Math.Between(5, 10), 0xffa500);
+                this.physics.add.existing(particle);
+                const angle = Phaser.Math.DegToRad(Phaser.Math.Between(0, 360));
+                const speed = Phaser.Math.Between(50, 150);
+                particle.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+                
+                this.tweens.add({
+                    targets: particle,
+                    alpha: 0,
+                    scale: 0.1,
+                    duration: 500,
+                    onComplete: () => particle.destroy()
+                });
+            }
+        }
+
+        function hitPlayer(playerObj, enemy) {
+            playerHealth -= 10;
+            createExplosion.call(this, enemy.x, enemy.y);
+            try { this.sound.play('explode', { volume: 0.2 }); } catch(e) {}
+            enemy.destroy();
+
+            if (playerHealth <= 0) {
+                playerHealth = 0;
+                this.physics.pause();
+                player.setAlpha(0.5);
+                this.add.text(400, 300, 'GAME OVER\nClick to Restart', { 
+                    fontSize: '48px', 
+                    fill: '#fff', 
+                    align: 'center' 
+                }).setOrigin(0.5).setInteractive().on('pointerdown', () => {
+                    location.reload();
+                });
+            }
+        }
+
+        function updateUI(time) {
+            scoreText.setText('Score: ' + score);
+            healthText.setText('Health: ' + playerHealth + '%');
+            
+            const weapon = weaponStats[currentWeapon];
+            weaponText.setText('Weapon: ' + weapon.name);
+
+            const timeToWait = (lastFiredTime + weapon.cooldown) - time;
+            if (timeToWait > 0) {
+                cooldownText.setText('CD: ' + (timeToWait / 1000).toFixed(1) + 's');
+                cooldownText.setFill('#f00');
+            } else {
+                cooldownText.setText('READY');
+                cooldownText.setFill('#0f0');
+            }
+        }
+    </script>
+</body>
+</html>
