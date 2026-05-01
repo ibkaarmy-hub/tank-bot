@@ -9,18 +9,18 @@
   *{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent}
   html,body{width:100%;height:100%;overflow:hidden}
   body{background:#1a1a2e;color:#fff;font-family:system-ui,sans-serif}
-  #hud{position:fixed;top:10px;left:0;right:0;display:flex;justify-content:space-around;font-size:14px;font-weight:bold;z-index:10;text-shadow:2px 2px 0 #000;flex-wrap:wrap;gap:5px;padding:0 10px}
+  #hud{position:fixed;top:10px;left:0;right:0;display:flex;justify-content:space-around;font-size:14px;font-weight:bold;z-index:10;text-shadow:2px 2px 0 #000;flex-wrap:wrap;gap:5px;padding:0 10px;pointer-events:none}
   #combo{position:fixed;top:55px;left:50%;transform:translateX(-50%);font-size:22px;color:#ffd700;font-weight:bold;text-shadow:2px 2px 0 #000;pointer-events:none}
   #levelTitle{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:32px;font-weight:bold;text-shadow:3px 3px 0 #000;z-index:15;pointer-events:none;opacity:0;transition:opacity 0.4s;text-align:center;padding:0 20px}
   #levelTitle.show{opacity:1}
   #powerup{position:fixed;bottom:50px;left:50%;transform:translateX(-50%);font-size:16px;font-weight:bold;color:#ffd700;text-shadow:2px 2px 0 #000;pointer-events:none}
-  #tapToStart{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:28px;font-weight:bold;color:#fff;text-shadow:3px 3px 0 #000;z-index:18;pointer-events:none;text-align:center;animation:pulse 1.2s infinite}
+  #tapToStart{position:fixed;top:30%;left:50%;transform:translate(-50%,-50%);font-size:28px;font-weight:bold;color:#fff;text-shadow:3px 3px 0 #000;z-index:18;pointer-events:none;text-align:center;animation:pulse 1.2s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
   #tapToStart.hide{display:none}
   canvas{position:fixed;top:0;left:0;display:block;width:100%;height:100%;touch-action:none;z-index:1}
   #screen{position:fixed;inset:0;background:rgba(0,0,0,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:20;text-align:center;padding:20px}
   #screen.show{display:flex}
-  button{background:#dc2626;color:#fff;border:3px solid #fff;padding:15px 40px;font-size:18px;border-radius:8px;margin-top:15px;cursor:pointer;font-weight:bold}
+  button{background:#dc2626;color:#fff;border:3px solid #fff;padding:15px 40px;font-size:18px;border-radius:8px;margin-top:15px;cursor:pointer;font-weight:bold;pointer-events:auto}
   h1{font-size:34px;margin-bottom:10px}
   h2{font-size:20px;color:#ffd700;margin-bottom:5px}
   p{margin:5px 0}
@@ -93,7 +93,7 @@ let timeLeft=60,maxTime=60;
 let enemies=[],pieces=[],powerups=[],floatingTexts=[];
 let activePower=null,powerEndsAt=0;
 let lastTime=0;
-let timerStarted=false; // KEY FIX: timer only starts after first tap
+let timerStarted=false;
 const TOTAL_LEVELS=5,WAVES_PER_LEVEL=4;
 
 const LEVELS=[
@@ -373,4 +373,233 @@ function activatePower(type){
   powerSound();
   if(type==='mega'){
     for(let i=0;i<enemies.length;i++){
-      const e=enemi
+      const e=enemies[i];
+      score+=ENEMY_TYPES[e.type].points*e.maxHp;
+      spawnPieces(e.x,e.y,20);
+    }
+    enemies=[];
+  }
+}
+
+function floatText(x,y,text,color){
+  floatingTexts.push({x:x,y:y,text:text,color:color||'#fff',life:60,vy:-2});
+}
+function updateFloatingTexts(){
+  for(let i=0;i<floatingTexts.length;i++){floatingTexts[i].y+=floatingTexts[i].vy;floatingTexts[i].life--}
+  floatingTexts=floatingTexts.filter(function(f){return f.life>0});
+}
+function drawFloatingTexts(){
+  for(let i=0;i<floatingTexts.length;i++){
+    const f=floatingTexts[i];
+    ctx.save();ctx.globalAlpha=f.life/60;
+    ctx.fillStyle=f.color;
+    ctx.font='bold 22px Arial';ctx.textAlign='center';
+    ctx.strokeStyle='#000';ctx.lineWidth=4;
+    ctx.strokeText(f.text,f.x,f.y);
+    ctx.fillText(f.text,f.x,f.y);
+    ctx.restore();
+  }
+}
+
+function tapAt(x,y){
+  if(gameOver||won) return;
+  if(!timerStarted){
+    timerStarted=true;
+    document.getElementById('tapToStart').classList.add('hide');
+  }
+  for(let i=powerups.length-1;i>=0;i--){
+    const p=powerups[i];
+    if(Math.hypot(x-p.x,y-p.y)<35){activatePower(p.type);powerups.splice(i,1);return;}
+  }
+  let hit=null,dist=Infinity;
+  for(let i=0;i<enemies.length;i++){
+    const e=enemies[i];
+    const dx=x-e.x,dy=y-(e.y+20*e.size);
+    const r=90*e.size;
+    if(Math.abs(dx)<r&&Math.abs(dy)<130*e.size){
+      const d=Math.hypot(dx,dy);
+      if(d<dist){dist=d;hit=e}
+    }
+  }
+  if(hit){
+    const cfg=ENEMY_TYPES[hit.type];
+    hit.hp--;hit.flash=4;hit.shake=8;
+    const now=Date.now();
+    if(now-lastTap<400) combo++; else combo=0;
+    lastTap=now;
+    let pts=cfg.points+combo*3;
+    if(activePower==='2x') pts*=2;
+    score+=pts;
+    floatText(x,y-30,'+'+pts,combo>2?'#ffd700':'#fff');
+    document.getElementById('score').textContent=score;
+    document.getElementById('combo').textContent=combo>1?'COMBO x'+(combo+1)+'!':'';
+    spawnPieces(x,y);
+    if(tg&&tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    cfg.sound();
+    if(hit.hp<=0){
+      spawnPieces(hit.x,hit.y,20);
+      if(cfg.splits&&hit.size>0.5){
+        for(let j=0;j<2;j++){
+          spawnEnemy('pundit',hit.x+(j?40:-40),hit.y);
+          enemies[enemies.length-1].size=hit.size*0.6;
+          enemies[enemies.length-1].hp=1;
+          enemies[enemies.length-1].maxHp=1;
+        }
+      }
+      if(Math.random()<0.15) spawnPowerup(hit.x,hit.y);
+      if(cfg.boss){won=true;showWinScreen();}
+      enemies=enemies.filter(function(e){return e!==hit});
+    }
+  } else {
+    combo=0;
+    document.getElementById('combo').textContent='';
+  }
+}
+
+let lastSpawn=0;
+function tick(now,dt){
+  if(!timerStarted) return;
+  const lvl=LEVELS[level-1];
+  let bossPresent=false;
+  for(let i=0;i<enemies.length;i++) if(enemies[i].type==='demon') bossPresent=true;
+  if(!lvl.boss||wave<WAVES_PER_LEVEL){
+    if(now-lastSpawn>lvl.spawnRate&&enemies.length<6+level){
+      spawnRandomEnemy();
+      lastSpawn=now;
+    }
+  } else if(lvl.boss&&wave===WAVES_PER_LEVEL&&!bossPresent){
+    enemies=[];spawnEnemy('demon',W/2,H/2);
+    showLevelTitle('BOSS: THE LOBBYIST DEMON');growl();
+  }
+  const waveTarget=wave*60;
+  if(score>=waveTarget){
+    if(wave<WAVES_PER_LEVEL){
+      wave++;document.getElementById('wave').textContent=wave;
+      showLevelTitle('WAVE '+wave);levelUpSnd();
+    } else if(!LEVELS[level-1].boss) {
+      won=true;
+      showWinScreen();
+    }
+  }
+  if(activePower&&now>powerEndsAt){activePower=null;document.getElementById('powerup').textContent='';}
+  const slowMul=activePower==='slow'?0.4:1;
+  timeLeft-=dt*slowMul;
+  if(timeLeft<=0&&!won) endGame(false);
+}
+
+function showLevelTitle(text){
+  const el=document.getElementById('levelTitle');
+  el.textContent=text;el.classList.add('show');
+  setTimeout(function(){el.classList.remove('show')},1800);
+}
+function showWinScreen(){
+  if(score>high){high=score;localStorage.setItem('magaloser_high',high)}
+  const el=document.getElementById('screen');
+  if(level>=TOTAL_LEVELS){
+    document.getElementById('screenTitle').textContent='YOU WIN!';
+    document.getElementById('screenSub').textContent='You smashed them all!';
+    document.getElementById('actionBtn').textContent='PLAY AGAIN';
+  } else {
+    document.getElementById('screenTitle').textContent='LEVEL '+level+' CLEAR!';
+    document.getElementById('screenSub').textContent=LEVELS[level]?LEVELS[level].name:'';
+    document.getElementById('actionBtn').textContent='NEXT LEVEL';
+  }
+  document.getElementById('final').textContent=score;
+  document.getElementById('finalHigh').textContent=high;
+  el.classList.add('show');
+}
+function endGame(victory){
+  gameOver=true;
+  if(score>high){high=score;localStorage.setItem('magaloser_high',high)}
+  const el=document.getElementById('screen');
+  document.getElementById('screenTitle').textContent=victory?'VICTORY!':"TIME'S UP!";
+  document.getElementById('screenSub').textContent='Made it to level '+level;
+  document.getElementById('final').textContent=score;
+  document.getElementById('finalHigh').textContent=high;
+  document.getElementById('actionBtn').textContent='TRY AGAIN';
+  el.classList.add('show');
+}
+function action(){
+  document.getElementById('screen').classList.remove('show');
+  if(won&&level<TOTAL_LEVELS){level++;won=false;startLevel();}
+  else {level=1;score=0;startLevel();}
+}
+function startLevel(){
+  const lvl=LEVELS[level-1];
+  wave=1;combo=0;timeLeft=lvl.time;maxTime=lvl.time;
+  enemies=[];pieces=[];powerups=[];floatingTexts=[];
+  activePower=null;gameOver=false;won=false;
+  timerStarted=false;
+  lastSpawn=0;
+  for(let i=0;i<3;i++) spawnRandomEnemy();
+  document.getElementById('level').textContent=level;
+  document.getElementById('wave').textContent=1;
+  document.getElementById('score').textContent=score;
+  document.getElementById('high').textContent=high;
+  document.getElementById('combo').textContent='';
+  document.getElementById('powerup').textContent='';
+  document.getElementById('tapToStart').classList.remove('hide');
+  showLevelTitle(lvl.name);
+  levelUpSnd();
+}
+
+function loop(now){
+  try {
+    let dt=lastTime?Math.min(0.05,(now-lastTime)/1000):0.016;
+    lastTime=now;
+    if(!gameOver&&!won) tick(now,dt);
+    const lvl=LEVELS[level-1];
+    const grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,lvl.bg[0]);grad.addColorStop(1,lvl.bg[1]);
+    ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(0,0,0,0.2)';ctx.fillRect(0,H*0.85,W,H*0.15);
+    ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(20,H-20,W-40,8);
+    ctx.fillStyle=timeLeft<10?'#dc2626':'#22c55e';
+    ctx.fillRect(20,H-20,(W-40)*Math.max(0,timeLeft/maxTime),8);
+    ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(20,H-20,W-40,8);
+    enemies.sort(function(a,b){return a.y-b.y});
+    for(let i=0;i<enemies.length;i++) drawEnemy(enemies[i]);
+    if(!gameOver&&!won&&timerStarted) updateEnemies(dt*(activePower==='slow'?0.4:1));
+    updatePieces();drawPieces();
+    updatePowerups(dt);drawPowerups();
+    updateFloatingTexts();drawFloatingTexts();
+  } catch(err){console.error('Loop error:',err);}
+  requestAnimationFrame(loop);
+}
+
+// FIXED tap handler — listens on the whole window with multiple event types
+function handleTap(e){
+  if(document.getElementById('screen').classList.contains('show')) return;
+  let cx, cy;
+  if(e.touches && e.touches.length){
+    cx = e.touches[0].clientX;
+    cy = e.touches[0].clientY;
+  } else if(e.changedTouches && e.changedTouches.length){
+    cx = e.changedTouches[0].clientX;
+    cy = e.changedTouches[0].clientY;
+  } else {
+    cx = e.clientX;
+    cy = e.clientY;
+  }
+  if(cx === undefined || cy === undefined) return;
+  tapAt(cx, cy);
+  if(e.cancelable) e.preventDefault();
+}
+window.addEventListener('pointerdown', handleTap, {passive:false});
+window.addEventListener('touchstart', handleTap, {passive:false});
+window.addEventListener('mousedown', handleTap);
+
+function startGame(){
+  resize();
+  document.getElementById('high').textContent=high;
+  startLevel();
+  requestAnimationFrame(loop);
+}
+if(document.readyState==='loading'){
+  window.addEventListener('DOMContentLoaded',startGame);
+} else {
+  startGame();
+}
+</script>
+</body>
+</html>
